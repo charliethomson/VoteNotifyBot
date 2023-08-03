@@ -10,4 +10,6 @@ public interface IDatabaseClient
     Task<ICollection<Vote>> FetchAllExpiredVotes(CancellationToken cancellationToken = default);
     Task<User?> FetchUser(string userId, CancellationToken cancellationToken = default);
     Task SetNotificationTime(int voteId, CancellationToken cancellationToken = default);
+    Task<PopulatedVote?> GetNewestVoteForUserId(string userId, CancellationToken cancellationToken = default);
+    Task<User?> GetUserByUsername(string userName, CancellationToken cancellationToken = default);
 }

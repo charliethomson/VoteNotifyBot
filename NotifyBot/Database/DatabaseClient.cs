@@ -21,8 +21,10 @@ public class DatabaseClient : IDatabaseClient
     public async Task InitializeAsync()
     {
         if (_client != null && _initialized) return;
-        var url = await _dopplerService.Get(DopplerSecrets.DatabaseUrl) ?? throw new InvalidDataException(DopplerSecrets.DatabaseUrl);
-        var key = await _dopplerService.Get(DopplerSecrets.DatabasePublicKey) ?? throw new InvalidDataException(DopplerSecrets.DatabasePublicKey);
+        var url = await _dopplerService.Get(DopplerSecrets.DatabaseUrl) ??
+                  throw new InvalidDataException(DopplerSecrets.DatabaseUrl);
+        var key = await _dopplerService.Get(DopplerSecrets.DatabasePublicKey) ??
+                  throw new InvalidDataException(DopplerSecrets.DatabasePublicKey);
 
         var options = new SupabaseOptions()
         {
@@ -55,7 +57,8 @@ public class DatabaseClient : IDatabaseClient
         var results = await FetchAllVotes(cancellationToken);
 
         return results.GroupBy(result => result.UserId)
-            .Select(group => group.OrderByDescending(vote => vote.ExpiresAt).First()).Where(vote => !vote.HasNotified).Where(vote => vote.ExpiresAt < DateTime.UtcNow).ToList();
+            .Select(group => group.OrderByDescending(vote => vote.ExpiresAt).First()).Where(vote => !vote.HasNotified)
+            .Where(vote => vote.ExpiresAt < DateTime.UtcNow).ToList();
     }
 
     public async Task<User?> FetchUser(string userId, CancellationToken cancellationToken = default)
@@ -68,7 +71,31 @@ public class DatabaseClient : IDatabaseClient
     public async Task SetNotificationTime(int voteId, CancellationToken cancellationToken = default)
     {
         await InitializeAsync();
-        await _client.From<Vote>().Filter(vote => vote.Id, Constants.Operator.Equals, voteId)
-            .Set(vote => vote.NotifiedAt, DateTime.UtcNow).Update(null, cancellationToken);
+        await _client!.From<Vote>().Filter(vote => vote.Id, Constants.Operator.Equals, voteId)
+            .Set(vote => vote.NotifiedAt!, DateTime.UtcNow).Update(null, cancellationToken);
+    }
+
+    public async Task<PopulatedVote?> GetNewestVoteForUserId(string userId,
+        CancellationToken cancellationToken = default)
+    {
+        await InitializeAsync();
+        var vote = await _client!.From<Vote>().Filter(vote => vote.UserId, Constants.Operator.Equals, userId)
+            .Order(vote => vote.ExpiresAt, Constants.Ordering.Descending).Limit(1).Single(cancellationToken);
+        var user = await FetchUser(userId, cancellationToken);
+        if (vote == null || user == null) return null;
+
+        return new PopulatedVote()
+        {
+            User = user,
+            Id = vote.Id,
+            CreatedAt = vote.CreatedAt,
+            ExpiresAt = vote.ExpiresAt,
+            NotifiedAt = vote.NotifiedAt
+        };
+    }
+
+    public async Task<User?> GetUserByUsername(string userName, CancellationToken cancellationToken = default)
+    {
+        return await _client!.From<User>().Where(user => user.UserName == userName).Limit(1).Single(cancellationToken);
     }
 }

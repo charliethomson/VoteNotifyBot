@@ -6,6 +6,7 @@ using System.Linq;
 using System.Threading.Channels;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
+using moment.net;
 using NotifyBot.Database;
 using NotifyBot.Secrets;
 using NotifyBot.Services;
@@ -112,7 +113,7 @@ public class App : IHostedService
         return Task.CompletedTask;
     }
 
-    private async Task OnReady()
+    private async Task CreateUserChannels()
     {
         await _discordClient.DownloadUsersAsync(new[] { Guild });
         var users = await _databaseClient.FetchAllUsers();
@@ -124,6 +125,75 @@ public class App : IHostedService
             _userChannels.Add(user.UserId, channel);
         }
     }
+
+    private async Task OnNextVote(SocketSlashCommand command)
+    {
+        var embed = new EmbedBuilder
+            { Description = "[Vote](https://v.ndr.gg)", Color = new Color(16315349) };
+
+        var user = await _databaseClient.GetUserByUsername(command.User.Username);
+        if (user == null)
+        {
+            await command.RespondAsync(
+                $"You haven't voted yet\n" +
+                $"(https://v.ndr.gg)",
+                embed: embed.Build());
+            return;
+        }
+
+        var newestVote = await _databaseClient.GetNewestVoteForUserId(user.UserId);
+        if (newestVote == null)
+        {
+            await command.RespondAsync(
+                $"You haven't voted yet\n" +
+                $"(https://v.ndr.gg)",
+                embed: embed.Build());
+            return;
+        }
+
+        if (newestVote.ExpiresAt < DateTime.UtcNow)
+        {
+            await command.RespondAsync(
+                $"You can vote now 🦶\n" +
+                $"(https://v.ndr.gg)",
+                embed: embed.Build());
+            return;
+        }
+
+        var dt = DateTime.UtcNow.To(newestVote.ExpiresAt);
+        await command.RespondAsync($"You can vote {dt}");
+    }
+
+    private async Task OnSlashCommand(SocketSlashCommand command)
+    {
+        switch (command.Data.Name)
+        {
+            case "nextvote":
+                await OnNextVote(command);
+                return;
+            default:
+                await command.RespondAsync($"I don't know how to handle {command.Data.Name} commands");
+                return;
+        }
+    }
+
+    private async Task RegisterCommands()
+    {
+        var nextVoteCommand = new SlashCommandBuilder()
+            .WithName("nextvote")
+            .WithDescription("Find out how long until you can vote again")
+            .Build();
+
+        await Guild.CreateApplicationCommandAsync(nextVoteCommand);
+        await _discordClient.CreateGlobalApplicationCommandAsync(nextVoteCommand);
+    }
+
+    private async Task OnReady()
+    {
+        await CreateUserChannels();
+        await RegisterCommands();
+    }
+
 
     public async Task OnUserJoined(SocketGuildUser user)
     {
@@ -159,7 +229,7 @@ public class App : IHostedService
         }
 
         var embed = new EmbedBuilder
-            {  Description = "[Vote](https://v.ndr.gg)", Color = new Color(16315349) };
+            { Description = "[Vote](https://v.ndr.gg)", Color = new Color(16315349) };
 
         await channel.SendMessageAsync(
             $"👋 {discordUser.Mention}\n" +
@@ -175,6 +245,7 @@ public class App : IHostedService
         _discordClient.Log += OnLog;
         _discordClient.Ready += OnReady;
         _discordClient.UserJoined += OnUserJoined;
+        _discordClient.SlashCommandExecuted += OnSlashCommand;
     }
 
     private void RemoveEventListeners()
@@ -182,6 +253,7 @@ public class App : IHostedService
         _discordClient.Log -= OnLog;
         _discordClient.Ready -= OnReady;
         _discordClient.UserJoined -= OnUserJoined;
+        _discordClient.SlashCommandExecuted -= OnSlashCommand;
     }
 
     public async Task StartAsync(CancellationToken cancellationToken)
