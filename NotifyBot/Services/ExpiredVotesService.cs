@@ -1,36 +1,33 @@
 ﻿using NotifyBot.Database;
 using NotifyBot.Database.Models;
 
-namespace NotifyBot;
+namespace NotifyBot.Services;
 
-public class ExpiredVotesService : IDisposable
+public class ExpiredVotesService : IExpiredVotesService
 {
-    private readonly DatabaseClient _databaseClient;
-    private ICollection<Vote> _votes { get; set; } = new List<Vote>();
+    private readonly IDatabaseClient _databaseClient;
+    private ICollection<Vote> Votes { get; set; } = new List<Vote>();
     private ICollection<User> Users { get; set; } = new List<User>();
 
-    public ICollection<PopulatedVote> Votes
+    public ICollection<PopulatedVote> GetVotes()
     {
-        get
-        {
-            var users = Users.ToDictionary(user => user.UserId);
+        var users = Users.ToDictionary(user => user.UserId);
 
-            return _votes.Select(vote => new PopulatedVote()
-            {
-                User = users[vote.UserId],
-                Id = vote.Id,
-                CreatedAt = vote.CreatedAt,
-                ExpiresAt = vote.ExpiresAt,
-                NotifiedAt = vote.NotifiedAt
-            }).ToList();
-        }
+        return Votes.Select(vote => new PopulatedVote()
+        {
+            User = users[vote.UserId],
+            Id = vote.Id,
+            CreatedAt = vote.CreatedAt,
+            ExpiresAt = vote.ExpiresAt,
+            NotifiedAt = vote.NotifiedAt
+        }).ToList();
     }
 
     private readonly CancellationTokenSource _cancellationTokenSource = new();
 
     private AsyncTimer? _timer;
 
-    public ExpiredVotesService(DatabaseClient databaseClient)
+    public ExpiredVotesService(IDatabaseClient databaseClient)
     {
         _databaseClient = databaseClient ?? throw new ArgumentNullException(nameof(databaseClient));
     }
@@ -49,7 +46,7 @@ public class ExpiredVotesService : IDisposable
 
     private async Task UpdateVotes(CancellationToken cancellationToken)
     {
-        _votes = await _databaseClient.FetchAllExpiredVotes(cancellationToken);
+        Votes = await _databaseClient.FetchAllExpiredVotes(cancellationToken);
         Users = await _databaseClient.FetchAllUsers(cancellationToken);
     }
 

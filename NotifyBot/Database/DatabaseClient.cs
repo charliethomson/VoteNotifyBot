@@ -1,47 +1,35 @@
-﻿using NotifyBot.Database.Models;
+﻿using Microsoft.Extensions.Configuration;
+using NotifyBot.Database.Models;
+using NotifyBot.Secrets;
 using Postgrest;
 using Supabase;
+using Client = Supabase.Client;
 
 namespace NotifyBot.Database;
 
-public class DatabaseClient
+public class DatabaseClient : IDatabaseClient
 {
     private bool _initialized = false;
-    private Supabase.Client _client;
-    private static DatabaseClient? _instance = null;
-    private static DatabaseClient Instance = _instance ?? Construct();
+    private Client? _client = null;
+    private readonly IDopplerService _dopplerService;
 
-    private static DatabaseClient Construct()
+    public DatabaseClient(IDopplerService dopplerService)
     {
-        _instance = new DatabaseClient();
-        return _instance;
+        _dopplerService = dopplerService ?? throw new ArgumentNullException(nameof(dopplerService));
     }
 
-    public DatabaseClient()
+    public async Task InitializeAsync()
     {
-        if (_instance != null)
-        {
-            _client = _instance._client;
-            _initialized = _instance._initialized;
-            return;
-        }
-
-        var config = Config.Instance;
-
-        var url = config.DatabaseUrl;
-        var key = config.DatabasePublicKey;
+        if (_client != null && _initialized) return;
+        var url = await _dopplerService.Get(DopplerSecrets.DatabaseUrl) ?? throw new InvalidDataException(DopplerSecrets.DatabaseUrl);
+        var key = await _dopplerService.Get(DopplerSecrets.DatabasePublicKey) ?? throw new InvalidDataException(DopplerSecrets.DatabasePublicKey);
 
         var options = new SupabaseOptions()
         {
             AutoConnectRealtime = true
         };
 
-        _client = new Supabase.Client(url, key, options);
-    }
-
-    public async Task InitializeAsync()
-    {
-        if (_initialized) return;
+        _client = new Client(url, key, options);
         await _client.InitializeAsync();
 
         _initialized = true;
@@ -50,14 +38,14 @@ public class DatabaseClient
     public async Task<ICollection<User>> FetchAllUsers(CancellationToken cancellationToken = default)
     {
         await InitializeAsync();
-        var result = await _client.From<User>().Get(cancellationToken);
+        var result = await _client!.From<User>().Get(cancellationToken);
         return result.Models;
     }
 
     public async Task<ICollection<Vote>> FetchAllVotes(CancellationToken cancellationToken = default)
     {
         await InitializeAsync();
-        var result = await _client.From<Vote>().Get(cancellationToken);
+        var result = await _client!.From<Vote>().Get(cancellationToken);
         return result.Models;
     }
 
@@ -73,7 +61,7 @@ public class DatabaseClient
     public async Task<User?> FetchUser(string userId, CancellationToken cancellationToken = default)
     {
         await InitializeAsync();
-        return await _client.From<User>().Filter(user => user.UserId, Constants.Operator.Equals, userId)
+        return await _client!.From<User>().Filter(user => user.UserId, Constants.Operator.Equals, userId)
             .Single(cancellationToken);
     }
 

@@ -1,4 +1,4 @@
-﻿namespace NotifyBot;
+﻿namespace NotifyBot.Services;
 
 public class AsyncTimer : IDisposable
 {

@@ -1,23 +1,24 @@
 ﻿using NotifyBot.Database;
 
-namespace NotifyBot;
+namespace NotifyBot.Services;
 
-public class NotifyService
+public class NotifyService : INotifyService
 {
     private AsyncTimer? _timer;
-    private readonly ExpiredVotesService _expiredVotesService;
-    private readonly Func<PopulatedVote, CancellationToken, Task> _notifyUser;
+    private readonly IExpiredVotesService _expiredVotesService;
+    private  Func<PopulatedVote, CancellationToken, Task>? _notifyUser;
     private readonly CancellationTokenSource _cancellationTokenSource = new();
 
-    public NotifyService(ExpiredVotesService expiredVotesService, Func<PopulatedVote, CancellationToken, Task> notifyUser)
+    public NotifyService(IExpiredVotesService expiredVotesService)
     {
         _expiredVotesService = expiredVotesService ?? throw new ArgumentNullException(nameof(expiredVotesService));
-        _notifyUser = notifyUser ?? throw new ArgumentNullException(nameof(notifyUser));
     }
-    
 
-    public async Task StartAsync()
+
+    public async Task StartAsync(Func<PopulatedVote, CancellationToken, Task>? notifyUser)
     {
+        _notifyUser = notifyUser ?? throw new ArgumentNullException(nameof(notifyUser));
+
         _timer = new AsyncTimer(NotifyUsers, TimeSpan.FromSeconds(5));
         await _timer.StartAsync(_cancellationTokenSource.Token);
     }
@@ -27,16 +28,19 @@ public class NotifyService
         if (_timer == null) return;
         await _timer.StopAsync(_cancellationTokenSource.Token);
     }
+
     public async void Dispose()
     {
         await StopAsync();
         _timer?.Dispose();
     }
+
     private async Task NotifyUsers(CancellationToken cancellationToken)
     {
-        var votes = _expiredVotesService.Votes;
+        if (_notifyUser == null) return; // Unreachable
+        var votes = _expiredVotesService.GetVotes();
         if (votes.Count == 0) return;
-        
+
         foreach (var vote in votes)
         {
             Console.WriteLine($"Notifying {vote.User.UserName}");
