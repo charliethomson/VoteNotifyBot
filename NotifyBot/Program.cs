@@ -33,9 +33,9 @@ public class Program
         return Guild.Users.FirstOrDefault(user => user.IsBot && user.Id == BotUserId);
     }
 
-    public async Task<SocketGuildUser?> GetUser(string userId)
+    public async Task<SocketGuildUser?> GetUser(string userId, CancellationToken cancellationToken = default)
     {
-        var user = await _databaseClient.FetchUser(userId);
+        var user = await _databaseClient.FetchUser(userId, cancellationToken);
         return user == null ? null : Guild.Users.FirstOrDefault(u => u.Username == user.UserName);
     }
 
@@ -100,8 +100,10 @@ public class Program
         UserChannels.Add(userEntry.UserId, channel);
     }
 
-    private async Task NotifyUser(string userId)
+    private async Task NotifyUser(PopulatedVote vote, CancellationToken cancellationToken)
     {
+        var userId = vote.User.UserId;
+        
         if (!UserChannels.ContainsKey(userId))
         {
             Console.WriteLine($"ERROR: Failed to notify. Missing UserChannel for UserId={userId}");
@@ -110,15 +112,16 @@ public class Program
 
         var channelId = UserChannels[userId];
         var channel = Guild.GetTextChannel(channelId);
-        var discordUser = await GetUser(userId);
+        var discordUser = await GetUser(userId, cancellationToken);
         if (discordUser == null)
         {
             Console.WriteLine($"FATAL: Failed to notify. Missing DB user for UserId={userId}");
             return;
         }
+        
+        await channel.SendMessageAsync($"{discordUser.Mention}! Time to vote! (Last voted @ {vote.CreatedAt.ToUniversalTime()} UTC)");
 
-        await channel.SendMessageAsync($"{discordUser.Mention}! Time to vote! :)");
-
+        await _databaseClient.SetNotificationTime(vote.Id, cancellationToken);
     }
     public async Task MainAsync()
     {
@@ -127,10 +130,10 @@ public class Program
         await _databaseClient.InitializeAsync();
 
         _expiredVotesService = new ExpiredVotesService(_databaseClient);
-        await _expiredVotesService.StartAsync();
+        await Task.Run(() => _expiredVotesService.StartAsync());
 
         _notifyService = new NotifyService(_expiredVotesService, NotifyUser);
-        await _notifyService.StartAsync();
+        await Task.Run(() => _notifyService.StartAsync());
         
         _discordClient = new DiscordSocketClient(new DiscordSocketConfig()
         {

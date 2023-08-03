@@ -47,28 +47,40 @@ public class DatabaseClient
         _initialized = true;
     }
 
-    public async Task<ICollection<User>> FetchAllUsers()
+    public async Task<ICollection<User>> FetchAllUsers(CancellationToken cancellationToken = default)
     {
         await InitializeAsync();
-        var result = await _client.From<User>().Get();
+        var result = await _client.From<User>().Get(cancellationToken);
         return result.Models;
     }
 
-    public async Task<ICollection<Vote>> FetchAllExpiredVotes()
+    public async Task<ICollection<Vote>> FetchAllVotes(CancellationToken cancellationToken = default)
     {
         await InitializeAsync();
-        var results = await _client.From<Vote>()
-            // Expires < Now => Is expired
-            // .Filter(vote => vote.ExpiresAt, Constants.Operator.LessThan, DateTime.UtcNow)
-            // .Filter(vote => vote.HasNotified, Constants.Operator.Equals, false)
-            .Get();
-        Console.WriteLine(results.Models.Count);
-        return results.Models;
+        var result = await _client.From<Vote>().Get(cancellationToken);
+        return result.Models;
     }
 
-    public async Task<User?> FetchUser(string userId)
+    public async Task<ICollection<Vote>> FetchAllExpiredVotes(CancellationToken cancellationToken = default)
     {
         await InitializeAsync();
-        return await _client.From<User>().Filter(user => user.UserId, Constants.Operator.Equals, userId).Single();
+        var results = await FetchAllVotes(cancellationToken);
+
+        return results.GroupBy(result => result.UserId)
+            .Select(group => group.OrderByDescending(vote => vote.ExpiresAt).First()).Where(vote => !vote.HasNotified).ToList();
+    }
+
+    public async Task<User?> FetchUser(string userId, CancellationToken cancellationToken = default)
+    {
+        await InitializeAsync();
+        return await _client.From<User>().Filter(user => user.UserId, Constants.Operator.Equals, userId)
+            .Single(cancellationToken);
+    }
+
+    public async Task SetNotificationTime(int voteId, CancellationToken cancellationToken = default)
+    {
+        await InitializeAsync();
+        await _client.From<Vote>().Filter(vote => vote.Id, Constants.Operator.Equals, voteId)
+            .Set(vote => vote.NotifiedAt, DateTime.UtcNow).Update(null, cancellationToken);
     }
 }

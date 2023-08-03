@@ -16,7 +16,7 @@ public class Config
     private static Config Construct()
     {
         _instance = JsonConvert
-            .DeserializeObject<Config>(File.ReadAllText(@"C:\Users\c\git\NotifyBotDiscordBotNotifyBott1\config.json"))
+            .DeserializeObject<Config>(File.ReadAllText(@"C:\Users\c\git\NotifyBot\NotifyBot\config.json"))
             ?? throw new InvalidDataException("shit broke");
         return _instance;
     }

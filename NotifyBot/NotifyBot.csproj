@@ -5,7 +5,7 @@
         <TargetFramework>net7.0</TargetFramework>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
-        <RootNamespace>DiscordBot1</RootNamespace>
+        <RootNamespace>NotifyBot</RootNamespace>
     </PropertyGroup>
 
     <ItemGroup>

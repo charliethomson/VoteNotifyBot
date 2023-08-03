@@ -47,10 +47,10 @@ public class ExpiredVotesService : IDisposable
         await _timer.StopAsync(_cancellationTokenSource.Token);
     }
 
-    private async Task UpdateVotes()
+    private async Task UpdateVotes(CancellationToken cancellationToken)
     {
-        _votes = await _databaseClient.FetchAllExpiredVotes();
-        Users = await _databaseClient.FetchAllUsers();
+        _votes = await _databaseClient.FetchAllExpiredVotes(cancellationToken);
+        Users = await _databaseClient.FetchAllUsers(cancellationToken);
     }
 
     public async void Dispose()

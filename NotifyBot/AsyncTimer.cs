@@ -7,9 +7,9 @@ public class AsyncTimer : IDisposable
     private readonly CancellationTokenSource _cancellationTokenSource = new CancellationTokenSource();
 
     private readonly TimeSpan _interval;
-    private readonly Func<Task> _callback;
+    private readonly Func<CancellationToken, Task> _callback;
 
-    public AsyncTimer(Func<Task> callback, TimeSpan? interval)
+    public AsyncTimer(Func<CancellationToken, Task> callback, TimeSpan? interval)
     {
         _callback = callback ?? throw new ArgumentNullException(nameof(callback));
         _interval = interval ?? TimeSpan.FromSeconds(5);
@@ -29,14 +29,10 @@ public class AsyncTimer : IDisposable
 
     private async Task ExecuteTaskAsync(CancellationToken cancellationToken)
     {
-        await RunJobAsync(cancellationToken);
+        await _callback(cancellationToken);
         _timer?.Change(_interval, TimeSpan.FromMilliseconds(-1));
     }
 
-    private async Task RunJobAsync(CancellationToken stoppingToken)
-    {
-        
-    }
 
     public async Task StopAsync(CancellationToken cancellationToken)
     {
@@ -58,7 +54,6 @@ public class AsyncTimer : IDisposable
             // Wait until the task completes or the stop token triggers
             await Task.WhenAny(_executingTask, Task.Delay(Timeout.Infinite, cancellationToken));
         }
-
     }
 
     public void Dispose()
