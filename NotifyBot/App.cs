@@ -5,18 +5,23 @@ using Newtonsoft.Json;
 using System.Linq;
 using System.Threading.Channels;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Hosting;
 using NotifyBot.Database;
 using NotifyBot.Secrets;
 using NotifyBot.Services;
+using Serilog;
 
 namespace NotifyBot;
 
-public class App
+public class App : IHostedService
 {
     private readonly IDopplerService _dopplerService;
     private readonly IDatabaseClient _databaseClient;
     private readonly IExpiredVotesService _expiredVotesService;
+
     private readonly INotifyService _notifyService;
+    private readonly ILogger _logger;
+
     private DiscordSocketClient _discordClient;
 
     private async Task<string> Token()
@@ -27,12 +32,13 @@ public class App
     private Dictionary<string, ulong> _userChannels = new();
 
     public App(IDopplerService dopplerService, IDatabaseClient databaseClient, IExpiredVotesService expiredVotesService,
-        INotifyService notifyService)
+        INotifyService notifyService, ILogger logger)
     {
         _dopplerService = dopplerService ?? throw new ArgumentNullException(nameof(dopplerService));
         _databaseClient = databaseClient ?? throw new ArgumentNullException(nameof(databaseClient));
         _expiredVotesService = expiredVotesService ?? throw new ArgumentNullException(nameof(expiredVotesService));
         _notifyService = notifyService ?? throw new ArgumentNullException(nameof(notifyService));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
     private async Task<ulong> BotUserId()
@@ -43,13 +49,13 @@ public class App
 
     private SocketGuild Guild => _discordClient.GetGuild(897241042724732968);
 
-    public async Task<SocketGuildUser?> GetBotUser()
+    private async Task<SocketGuildUser?> GetBotUser()
     {
         var botUserId = await BotUserId();
         return Guild.Users.FirstOrDefault(user => user.IsBot && user.Id == botUserId);
     }
 
-    public async Task<SocketGuildUser?> GetUser(string userId, CancellationToken cancellationToken = default)
+    private async Task<SocketGuildUser?> GetUser(string userId, CancellationToken cancellationToken = default)
     {
         var user = await _databaseClient.FetchUser(userId, cancellationToken);
         return user == null ? null : Guild.Users.FirstOrDefault(u => u.Username == user.UserName);
@@ -57,7 +63,31 @@ public class App
 
     private Task Log(LogMessage message)
     {
-        Console.WriteLine(message.ToString());
+        switch (message.Severity)
+        {
+            case LogSeverity.Critical:
+                _logger.Fatal(message.ToString());
+                break;
+            case LogSeverity.Debug:
+                _logger.Debug(message.ToString());
+                break;
+            case LogSeverity.Error:
+                _logger.Error(message.ToString());
+                break;
+            case LogSeverity.Info:
+                _logger.Information(message.ToString());
+                break;
+            case LogSeverity.Warning:
+                _logger.Warning(message.ToString());
+                break;
+            case LogSeverity.Verbose:
+                _logger.Verbose(message.ToString());
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(message.Severity.ToString());
+        }
+
+        ;
         return Task.CompletedTask;
     }
 
@@ -147,7 +177,14 @@ public class App
         _discordClient.UserJoined += UserJoined;
     }
 
-    public async Task Run()
+    private void RemoveEventListeners()
+    {
+        _discordClient.Log -= Log;
+        _discordClient.Ready -= Ready;
+        _discordClient.UserJoined -= UserJoined;
+    }
+
+    public async Task StartAsync(CancellationToken cancellationToken)
     {
         await _databaseClient.InitializeAsync();
         await _expiredVotesService.StartAsync();
@@ -163,9 +200,11 @@ public class App
 
         await _discordClient.LoginAsync(TokenType.Bot, await Token());
         await _discordClient.StartAsync();
+    }
 
-        await Task.Delay(-1);
-
+    public async Task StopAsync(CancellationToken cancellationToken)
+    {
+        RemoveEventListeners();
         await _notifyService.StopAsync();
         await _expiredVotesService.StopAsync();
         await _discordClient.StopAsync();
