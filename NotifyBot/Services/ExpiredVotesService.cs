@@ -50,9 +50,4 @@ public class ExpiredVotesService : IExpiredVotesService
         Users = await _databaseClient.FetchAllUsers(cancellationToken);
     }
 
-    public async void Dispose()
-    {
-        await StopAsync();
-        _timer?.Dispose();
-    }
 }

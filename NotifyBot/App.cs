@@ -24,11 +24,6 @@ public class App : IHostedService
 
     private DiscordSocketClient _discordClient;
 
-    private async Task<string> Token()
-    {
-        return await _dopplerService.Get(DopplerSecrets.DiscordToken);
-    }
-
     private Dictionary<string, ulong> _userChannels = new();
 
     public App(IDopplerService dopplerService, IDatabaseClient databaseClient, IExpiredVotesService expiredVotesService,
@@ -39,6 +34,11 @@ public class App : IHostedService
         _expiredVotesService = expiredVotesService ?? throw new ArgumentNullException(nameof(expiredVotesService));
         _notifyService = notifyService ?? throw new ArgumentNullException(nameof(notifyService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
+
+    private async Task<string> Token()
+    {
+        return await _dopplerService.Get(DopplerSecrets.DiscordToken);
     }
 
     private async Task<ulong> BotUserId()
@@ -61,7 +61,29 @@ public class App : IHostedService
         return user == null ? null : Guild.Users.FirstOrDefault(u => u.Username == user.UserName);
     }
 
-    private Task Log(LogMessage message)
+    private async Task<ulong> CreateChannelAsync(SocketGuildUser discordUser)
+    {
+        if (discordUser == null) throw new ArgumentNullException(nameof(discordUser));
+
+        var channel = Guild.TextChannels.FirstOrDefault(channel => channel.Name == discordUser.DisplayName);
+        if (channel != null) return channel.Id;
+
+        var createdChannel = await Guild.CreateTextChannelAsync(discordUser.DisplayName);
+        await createdChannel.AddPermissionOverwriteAsync(Guild.EveryoneRole,
+            new OverwritePermissions(viewChannel: PermValue.Deny));
+        await createdChannel.AddPermissionOverwriteAsync(discordUser,
+            new OverwritePermissions(viewChannel: PermValue.Allow, sendMessages: PermValue.Allow));
+        await createdChannel.AddPermissionOverwriteAsync(await GetBotUser(),
+            new OverwritePermissions());
+
+        await createdChannel.SendMessageAsync(
+            $"👋 Hello {discordUser.Mention}! I will mention you in this channel to remind you to vote 😊");
+
+        return createdChannel.Id;
+    }
+
+
+    private Task OnLog(LogMessage message)
     {
         switch (message.Severity)
         {
@@ -87,33 +109,10 @@ public class App : IHostedService
                 throw new ArgumentOutOfRangeException(message.Severity.ToString());
         }
 
-        ;
         return Task.CompletedTask;
     }
 
-    public async Task<ulong> CreateChannelAsync(SocketGuildUser discordUser)
-    {
-        if (discordUser == null) throw new ArgumentNullException(nameof(discordUser));
-
-        var channel = Guild.TextChannels.FirstOrDefault(channel => channel.Name == discordUser.DisplayName);
-        if (channel != null) return channel.Id;
-
-        var createdChannel = await Guild.CreateTextChannelAsync(discordUser.DisplayName);
-        await createdChannel.AddPermissionOverwriteAsync(Guild.EveryoneRole,
-            new OverwritePermissions(viewChannel: PermValue.Deny));
-        await createdChannel.AddPermissionOverwriteAsync(discordUser,
-            new OverwritePermissions(viewChannel: PermValue.Allow, sendMessages: PermValue.Allow));
-        await createdChannel.AddPermissionOverwriteAsync(await GetBotUser(),
-            new OverwritePermissions());
-
-        await createdChannel.SendMessageAsync(
-            $"👋 Hello {discordUser.Mention}! I will mention you in this channel to remind you to vote 😊");
-
-        return createdChannel.Id;
-    }
-
-
-    private async Task Ready()
+    private async Task OnReady()
     {
         await _discordClient.DownloadUsersAsync(new[] { Guild });
         var users = await _databaseClient.FetchAllUsers();
@@ -124,14 +123,9 @@ public class App : IHostedService
             var channel = await CreateChannelAsync(discordUser);
             _userChannels.Add(user.UserId, channel);
         }
-
-        foreach (var socketTextChannel in Guild.TextChannels)
-        {
-            Console.WriteLine(socketTextChannel.Name);
-        }
     }
 
-    public async Task UserJoined(SocketGuildUser user)
+    public async Task OnUserJoined(SocketGuildUser user)
     {
         if (_userChannels.ContainsValue(user.Id)) return;
 
@@ -151,7 +145,7 @@ public class App : IHostedService
 
         if (!_userChannels.ContainsKey(userId))
         {
-            Console.WriteLine($"ERROR: Failed to notify. Missing UserChannel for UserId={userId}");
+            _logger.Error($"Failed to notify. Missing UserChannel for UserId={userId}");
             return;
         }
 
@@ -160,28 +154,34 @@ public class App : IHostedService
         var discordUser = await GetUser(userId, cancellationToken);
         if (discordUser == null)
         {
-            Console.WriteLine($"FATAL: Failed to notify. Missing DB user for UserId={userId}");
+            _logger.Error($"Failed to notify. Missing DB user for UserId={userId}");
             return;
         }
 
+        var embed = new EmbedBuilder
+            {  Description = "[Vote](https://v.ndr.gg)", Color = new Color(16315349) };
+
         await channel.SendMessageAsync(
-            $"{discordUser.Mention}! Time to vote! (Last voted @ {vote.CreatedAt.ToUniversalTime()} UTC)");
+            $"👋 {discordUser.Mention}\n" +
+            $"(Last voted @ {vote.CreatedAt.ToUniversalTime()} UTC)\n" +
+            $"(https://v.ndr.gg)",
+            embed: embed.Build());
 
         await _databaseClient.SetNotificationTime(vote.Id, cancellationToken);
     }
 
     private void AddEventListeners()
     {
-        _discordClient.Log += Log;
-        _discordClient.Ready += Ready;
-        _discordClient.UserJoined += UserJoined;
+        _discordClient.Log += OnLog;
+        _discordClient.Ready += OnReady;
+        _discordClient.UserJoined += OnUserJoined;
     }
 
     private void RemoveEventListeners()
     {
-        _discordClient.Log -= Log;
-        _discordClient.Ready -= Ready;
-        _discordClient.UserJoined -= UserJoined;
+        _discordClient.Log -= OnLog;
+        _discordClient.Ready -= OnReady;
+        _discordClient.UserJoined -= OnUserJoined;
     }
 
     public async Task StartAsync(CancellationToken cancellationToken)
@@ -193,7 +193,9 @@ public class App : IHostedService
         _discordClient = new DiscordSocketClient(new DiscordSocketConfig()
         {
             AlwaysDownloadUsers = true,
-            GatewayIntents = GatewayIntents.AllUnprivileged | GatewayIntents.GuildMembers | GatewayIntents.GuildMessages
+            GatewayIntents = GatewayIntents.AllUnprivileged | GatewayIntents.GuildMembers |
+                             GatewayIntents.GuildMessages ^ GatewayIntents.GuildScheduledEvents ^
+                             GatewayIntents.GuildInvites
         });
 
         AddEventListeners();

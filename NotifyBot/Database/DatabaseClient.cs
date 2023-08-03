@@ -55,7 +55,7 @@ public class DatabaseClient : IDatabaseClient
         var results = await FetchAllVotes(cancellationToken);
 
         return results.GroupBy(result => result.UserId)
-            .Select(group => group.OrderByDescending(vote => vote.ExpiresAt).First()).Where(vote => !vote.HasNotified).ToList();
+            .Select(group => group.OrderByDescending(vote => vote.ExpiresAt).First()).Where(vote => !vote.HasNotified).Where(vote => vote.ExpiresAt < DateTime.UtcNow).ToList();
     }
 
     public async Task<User?> FetchUser(string userId, CancellationToken cancellationToken = default)

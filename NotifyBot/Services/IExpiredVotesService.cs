@@ -2,7 +2,7 @@
 
 namespace NotifyBot.Services;
 
-public interface IExpiredVotesService : IDisposable
+public interface IExpiredVotesService
 {
     public ICollection<PopulatedVote> GetVotes();
     public Task StartAsync();

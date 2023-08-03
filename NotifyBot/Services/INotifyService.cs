@@ -2,7 +2,7 @@
 
 namespace NotifyBot.Services;
 
-public interface INotifyService : IDisposable
+public interface INotifyService
 {
     Task StartAsync(Func<PopulatedVote, CancellationToken, Task>? notifyUser);
 
